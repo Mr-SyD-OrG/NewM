@@ -8,24 +8,23 @@ async def run_forwarding(client, message):
         return await message.reply("No userbot account found. Use /add_account first.")
 
     if user.get("enabled", False):
-        return await message.reply("Forwarding already running. Use /stop to end it before starting again.")
+        return await message.reply("Fᴏʀᴡᴀʀᴅɪɴɢ ᴀʟʀᴇᴀᴅʏ ʀᴜɴɴɪɴɢ. Uꜱᴇ /stop ᴛᴏ ᴇɴᴅ ɪᴛ ʙᴇꜰᴏʀᴇ ꜱᴛᴀʀᴛɪɴɢ ᴀɢᴀɪɴ.")
 
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📩 Normal Message", callback_data="normal"),
-            InlineKeyboardButton("🔁 Forward Tag", callback_data="forward")
+            InlineKeyboardButton("Fᴏʀᴡᴀʀᴅ : Sᴀᴠᴇᴅ Mᴇꜱꜱᴀɢᴇ", callback_data="normal"),
+            InlineKeyboardButton("Fᴏʀᴡᴀʀᴅ : Wɪᴛʜ Tᴀɢ", callback_data="forward")
         ]
     ])
     choose = await message.reply(
-        "How do you want to forward messages? Choose an option below (timeout 30s):",
+        "Hᴏᴡ ᴅᴏ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ꜱᴇɴᴅ ᴛʜᴇ ᴍᴇꜱꜱᴀɢᴇ?\nCʟɪᴄᴋ ᴏɴ ꜱᴀᴠᴇᴅ ᴍᴇꜱꜱᴀɢᴇ ᴛᴏ ꜱᴇɴᴅ ʟᴀꜱᴛ ᴍᴇꜱꜱᴀɢᴇ ꜱᴀᴠᴇᴅ ʙʏ ᴛʜᴇ ᴜꜱᴇʀ ʙᴏᴛ\nCʟɪᴄᴋ ᴏɴ ᴡɪᴛʜ ᴛᴀɢ ɪꜰ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ꜱᴇɴᴅ ᴍᴇꜱꜱᴀɢᴇ ᴡɪᴛʜ ᴛʜᴇ ꜰᴏʀᴡᴀʀᴅ ᴛᴀɢ [ʏᴏᴜ ʜᴀᴠᴇ ᴛᴏ ɢɪᴠᴇ ᴛʜᴇ ɪɴᴩᴜᴛ ꜰᴏʀ ᴛʜᴀᴛ] \nCʜᴏᴏꜱᴇ ᴀɴ ᴏᴩᴛɪᴏɴ ʙᴇʟᴏᴡ (timeout 60s):",
         reply_markup=keyboard
     )
-
-    
-
     try:
         cb: CallbackQuery = await client.listen(user_id, timeout=60)
     except asyncio.exceptions.TimeoutError:
+        await choose.delete()
+        await message.reply("Tɪᴍᴇ ᴏᴜᴛ, Cʟɪᴄᴋ ᴏɴ /run ᴛᴏ ꜱᴛᴀʀᴛ ᴀɢᴀɪɴ")
         return
 
     if cb.data.startswith("forward"):
