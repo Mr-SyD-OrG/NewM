@@ -16,12 +16,12 @@ async def run_forwarding(client, message):
             InlineKeyboardButton("🔁 Forward Tag", callback_data="forward")
         ]
     ])
-    await message.reply(
+    choose = await message.reply(
         "How do you want to forward messages? Choose an option below (timeout 30s):",
         reply_markup=keyboard
     )
 
-    forward_message_id = None
+    
 
     try:
         cb: CallbackQuery = await client.listen(user_id, timeout=60)
@@ -32,21 +32,18 @@ async def run_forwarding(client, message):
         try:
             user_msg = await client.ask(
                 chat_id=user_id,
-                text="Send the message you want to save.\n\n**Don't add extra text — it will be treated as ad text.**",
+                text="Send the message you want to save.\n\n**With Tag. Timeout in 5min**",
                 timeout=300
             )
-            log_msg = await user_msg.copy(
-                chat_id=Config.LOG_CHANNEL,
-                caption="📝 Forward Tag Message",
-                parse_mode=enums.ParseMode.HTML
-            )
+            msg = await user_msg.forward(chat_id=Config.MES_CHANNEL)  
             # Store the message ID in DB
-            await db.update_user(user_id, {"forward_message_id": log_msg.message_id})
+            await db.update_user(user_id, {"forward_message_id": msg.message_id})
+            await user_msg.delete()
         except asyncio.exceptions.TimeoutError:
             return await message.reply("❌ Timed out. Please start again using /run.")
 
-    syd = await message.reply("Starting...")
-
+    await choose.delete()
+    syd = await message.reply("Starting....")
     is_premium = user.get("is_premium", False)
     can_use_interval = user.get("can_use_interval", False)
 
@@ -125,3 +122,144 @@ async def run_forwarding(client, message):
         )
     except:
         pass
+
+
+
+
+async def start_forwarding_loop(tele_client, user_id, groups, is_premium, can_use_interval, client, index):
+    if index > 0:
+        await asyncio.sleep(600 * index)  # 10min, if 2, 20min
+        await client.send_message(user_id, f"Starting {index}")
+    usr = await client.get_users(user_id)
+    user_nam = f"For @{usr.username}" if usr.username else ""
+
+    while True:
+        interval = 1
+        total_slep = 20
+        if not (await db.get_user(user_id)).get("enabled", False):
+            break
+
+        try:
+            if not is_premium:
+                meme = await tele_client.get_me()
+                expected_name = f"Bot is run by @{temp.U_NAME} " + user_nam
+                current_last_name = meme.last_name or ""
+                full = await tele_client(GetFullUserRequest(meme.id))
+                current_bio = full.full_user.about or ""
+                message_lines = ["WARNING: You Have Changed Account Info. [Never Repeat Again. To Remove Ad Get Premium]"]
+                update_needed = False
+                bio_edit = current_bio
+
+                if current_last_name != expected_name:
+                    message_lines.append(f"\nLast name is '{current_last_name}', updating to '{expected_name}'.")
+                    update_needed = True
+
+                if current_bio != expected_name:
+                    message_lines.append(f"\nBio is '{current_bio}', updating to '{expected_name}'.")
+                    update_needed = True
+                    bio_edit = expected_name
+
+                if update_needed:
+                    await tele_client(UpdateProfileRequest(
+                        last_name=expected_name,
+                        about=bio_edit
+                    ))
+                    await client.send_message(user_id, "\n".join(message_lines))
+        except Exception as e:
+            await client.send_message(user_id, f"Error in Getting Message: {e}")
+            print(f"Failed to check user data: {e}")
+
+        try:
+            forward_entry = await db.get_user(user_id)
+            use_forward = forward_entry.get("forward_message_id", None)
+            if use_forward:
+                msg_id = forward_entry.get("forward_message_id")
+                last_msg = await tele_client.get_messages(entity=Config.MES_CHANNEL, ids=msg_id)
+                #use_forward = True
+            else:
+                last_msg = (await tele_client.get_messages("me", limit=1))[0]
+               # use_forward = False
+        except Exception as e:
+            print(f"Failed to fetch message: {e}")
+            await client.send_message(user_id, f"Error in Getting Message: {e}")
+            for _ in range(total_slep // interval):
+                if not (await db.get_user(user_id)).get("enabled", False):
+                    break
+                await asyncio.sleep(interval)
+            continue
+
+        for grp in groups:
+            gid = grp["id"]
+            topic_id = grp.get("topic_id")
+            interval = grp.get("interval", 300 if (is_premium or can_use_interval) else 7200)
+            last_sent = grp.get("last_sent", datetime.min)
+            total_wait = interval - (datetime.now() - last_sent).total_seconds()
+            if total_wait > 0:
+                # Wait total_wait seconds but check every 1 second if enabled
+                for _ in range(int(total_wait)):
+                    if not (await db.get_user(user_id)).get("enabled", False):
+                        break
+                    await asyncio.sleep(1)
+            try:
+                if use_forward:
+                    await tele_client.forward_messages(
+                        entity=gid,
+                        messages=last_msg.id,
+                        from_peer=Config.MES_CHANNEL,
+                        reply_to=topic_id if topic_id else None
+                    )
+                else:
+                    await tele_client.send_message(
+                        gid,
+                        last_msg,
+                        reply_to=topic_id if topic_id else None
+                    )
+                grp["last_sent"] = datetime.now()
+                me = await tele_client.get_me()
+                await db.group.update_one({"_id": me.id}, {"$set": {"groups": groups}})
+                await db.user_messages.insert_one({
+                    "user_id": user_id,
+                    "group_id": gid,
+                    "time": datetime.now(tz=india)
+                    })
+            except Exception as e:
+                print(f"Error sending to {gid}: {e}")
+                await client.send_message(user_id, f"Error sending to {gid}:\n{e} \nSend This Message To The Admin, To Take Proper Action, Forwarding Won't Stop.[Never Let The Account Get Banned Due To Spam]")
+
+        for _ in range(total_slep // interval):
+            if not (await db.get_user(user_id)).get("enabled", False):
+                break
+            await asyncio.sleep(interval)
+
+    await client.send_message(user_id, "Sᴛᴏᴩᴩᴇᴅ..!")
+    await db.update_user(user_id, {"forward_message_id": None})
+    syd = await client.send_message(user_id, "Sᴇɴᴅɪɴɢ ꜰᴏʀᴡᴀʀᴅ ᴅᴀᴛᴀ...")
+
+    entries = await db.user_messages.find({"user_id": user_id}).to_list(None)
+    if not entries:
+        return await syd.edit("No forwarding data found for this user.")
+
+    grouped = defaultdict(list)
+    for entry in entries:
+        group_id = entry.get("group_id")
+        timestamp = entry.get("time")
+        if isinstance(timestamp, datetime):
+            timestamp = timestamp.astimezone(india)
+            timestamp_str = timestamp.strftime("%Y-%m-%d %H:%M:%S IST")
+        else:
+            timestamp_str = str(timestamp)
+        grouped[group_id].append(timestamp_str)
+    for group_id in grouped:
+        grouped[group_id].sort()
+    out = f"User ID: {user_id}\n"
+    for group_id, times in grouped.items():
+        out += f"  => Group ID: {group_id}\n"
+        for t in times:
+            out += f"    - {t}\n"
+    with open("forward.txt", "w", encoding="utf-8") as f:
+        f.write(out)
+
+    await client.send_document(user_id, "forward.txt", caption=f"Fᴏʀᴡᴀʀᴅ ʟᴏɢꜱ")
+    await db.user_messages.delete_many({"user_id": user_id})
+    await syd.delete()
+
